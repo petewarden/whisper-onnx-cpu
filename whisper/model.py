@@ -5,7 +5,6 @@ from typing import List, Dict, Tuple
 import numpy as np
 import requests
 import psutil
-import onnx
 import onnxruntime as ort
 from whisper.decoding import detect_language as detect_language_function, decode as decode_function
 from whisper.utils import onnx_dtype_to_np_dtype_convert
@@ -21,20 +20,6 @@ _MODELS = {
     "medium.en": "https://s3.ap-northeast-2.wasabisys.com/pinto-model-zoo/381_Whisper/pt/medium.en.pt",
     "medium": "https://s3.ap-northeast-2.wasabisys.com/pinto-model-zoo/381_Whisper/pt/medium.pt",
 }
-
-def model_download(name: str, onnx_file_save_path: str='.') -> onnx.ModelProto:
-    onnx_file_path = f'{onnx_file_save_path}/{name}_11.onnx'
-    onnx_serialized_graph = None
-    if not os.path.exists(onnx_file_path):
-        url = f'https://s3.ap-northeast-2.wasabisys.com/pinto-model-zoo/381_Whisper/onnx/{name}_11.onnx'
-        onnx_serialized_graph = requests.get(url).content
-        with io.BytesIO(onnx_serialized_graph) as f:
-            onnx_graph: onnx.ModelProto = onnx.load(f)
-            onnx.save(onnx_graph, f'{onnx_file_save_path}/{name}_11.onnx')
-    else:
-        onnx_graph: onnx.ModelProto = onnx.load(onnx_file_path)
-        onnx_serialized_graph = onnx_graph.SerializeToString()
-    return onnx_serialized_graph
 
 def load_model(name: str):
     """
@@ -104,7 +89,7 @@ class OnnxAudioEncoder():
         sess_options.intra_op_num_threads = psutil.cpu_count(logical=True) - 1
         self.sess = \
             ort.InferenceSession(
-                path_or_bytes=model_download(name=f'{model}_encoder'),
+                path_or_bytes=f'{model}_encoder_11.onnx',
                 sess_options=sess_options,
                 providers=[
                     'CPUExecutionProvider'
@@ -142,7 +127,7 @@ class OnnxTextDecoder():
         sess_options.intra_op_num_threads = psutil.cpu_count(logical=True) - 1
         self.sess = \
             ort.InferenceSession(
-                path_or_bytes=model_download(name=f'{model}_decoder'),
+                path_or_bytes=f'{model}_decoder_11.onnx',
                 sess_options=sess_options,
                 providers=[
                     'CPUExecutionProvider'
