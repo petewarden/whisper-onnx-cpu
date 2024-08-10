@@ -33,7 +33,7 @@ def model_download(name: str, onnx_file_save_path: str='.') -> onnx.ModelProto:
             onnx.save(onnx_graph, f'{onnx_file_save_path}/{name}_11.onnx')
     else:
         onnx_graph: onnx.ModelProto = onnx.load(onnx_file_path)
-        onnx_serialized_graph = onnx._serialize(onnx_graph)
+        onnx_serialized_graph = onnx_graph.SerializeToString()
     return onnx_serialized_graph
 
 def load_model(name: str):
