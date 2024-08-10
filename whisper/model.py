@@ -222,6 +222,4 @@ class Whisper():
             raise ValueError(f"Unsupported model type: {self.type}")
         return np.zeros(size, dtype=np.float32)
 
-    detect_language = detect_language_function
-    # transcribe = transcribe_function
     decode = decode_function

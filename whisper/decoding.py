@@ -261,7 +261,7 @@ class GreedyDecoder(TokenDecoder):
     def update(self, tokens: np.ndarray, logits: np.ndarray, sum_logprobs: np.ndarray) -> Tuple[np.ndarray, bool]:
         temperature = self.temperature
         if temperature == 0:
-            next_tokens = logits.argmax(dim=-1)
+            next_tokens = logits.argmax(axis=-1)
         else:
             next_tokens = numpy_categorical_sample(logits, temperature)
 
@@ -460,12 +460,12 @@ class DecodingTask:
     def __init__(self, model: "Whisper", options: DecodingOptions):
         self.model = model
 
-        language = options.language or "en"
+        language = "en"
         tokenizer = get_tokenizer(model.is_multilingual, language=language, task=options.task)
         self.tokenizer: Tokenizer = tokenizer
         self.options: DecodingOptions = self._verify_options(options)
 
-        self.n_group: int = options.beam_size or options.best_of or 1
+        self.n_group: int = 1
         self.n_ctx: int = model.dims.n_text_ctx
         self.sample_len: int = options.sample_len or model.dims.n_text_ctx // 2
 
@@ -483,13 +483,7 @@ class DecodingTask:
         # sequence ranker: implements how to rank a group of sampled sequences
         self.sequence_ranker = MaximumLikelihoodRanker(options.length_penalty)
 
-        # decoder: implements how to select the next tokens, given the autoregressive distribution
-        if options.beam_size is not None:
-            self.decoder = BeamSearchDecoder(
-                options.beam_size, tokenizer.eot, self.inference, options.patience
-            )
-        else:
-            self.decoder = GreedyDecoder(options.temperature, tokenizer.eot)
+        self.decoder = GreedyDecoder(options.temperature, tokenizer.eot)
 
         # logit filters: applies various rules to suppress or penalize certain tokens
         self.logit_filters = []
@@ -507,15 +501,15 @@ class DecodingTask:
             )
 
     def _verify_options(self, options: DecodingOptions) -> DecodingOptions:
-        if options.beam_size is not None and options.best_of is not None:
-            raise ValueError("beam_size and best_of can't be given together")
-        if options.temperature == 0:
-            if options.best_of is not None:
-                raise ValueError("best_of with greedy sampling (T=0) is not compatible")
-        if options.patience is not None and options.beam_size is None:
-            raise ValueError("patience requires beam_size to be given")
-        if options.length_penalty is not None and not (0 <= options.length_penalty <= 1):
-            raise ValueError("length_penalty (alpha) should be a value between 0 and 1")
+        # if options.beam_size is not None and options.best_of is not None:
+        #     raise ValueError("beam_size and best_of can't be given together")
+        # if options.temperature == 0:
+        #     if options.best_of is not None:
+        #         raise ValueError("best_of with greedy sampling (T=0) is not compatible")
+        # if options.patience is not None and options.beam_size is None:
+        #     raise ValueError("patience requires beam_size to be given")
+        # if options.length_penalty is not None and not (0 <= options.length_penalty <= 1):
+        #     raise ValueError("length_penalty (alpha) should be a value between 0 and 1")
 
         return options
 
@@ -573,18 +567,6 @@ class DecodingTask:
 
         return audio_features
 
-    def _detect_language(self, audio_features: np.ndarray, tokens: np.ndarray):
-        languages = [self.options.language] * audio_features.shape[0]
-        lang_probs = None
-
-        if self.options.language is None or self.options.task == "lang_id":
-            lang_tokens, lang_probs = self.model.detect_language(audio_features, self.tokenizer)
-            languages = [max(probs, key=probs.get) for probs in lang_probs]
-            if self.options.language is None:
-                tokens[:, self.sot_index + 1] = lang_tokens  # write language tokens
-
-        return languages, lang_probs
-
     def _main_loop(self, audio_features: np.ndarray, tokens: np.ndarray):
         assert audio_features.shape[0] == tokens.shape[0]
         n_batch = tokens.shape[0]
@@ -625,14 +607,6 @@ class DecodingTask:
         token = np.array([self.initial_tokens])
         tokens: np.ndarray = np.broadcast_to(token, (n_audio, token.shape[1]))
 
-        # detect language if requested, overwriting the language token
-        languages, language_probs = self._detect_language(audio_features, tokens)
-        if self.options.task == "lang_id":
-            return [
-                DecodingResult(audio_features=features, language=language, language_probs=probs)
-                for features, language, probs in zip(audio_features, languages, language_probs)
-            ]
-
         # repeat the audio & text tensors by the group size, for beam search or best-of-n sampling
         audio_features = np.repeat(a=audio_features, repeats=self.n_group, axis=0)
         tokens = np.repeat(a=tokens, repeats=self.n_group, axis=0)
@@ -662,14 +636,14 @@ class DecodingTask:
         sum_logprobs: List[float] = [lp[i] for i, lp in zip(selected, sum_logprobs)]
         avg_logprobs: List[float] = [lp / (len(t) + 1) for t, lp in zip(tokens, sum_logprobs)]
 
-        fields = (texts, languages, tokens, audio_features, avg_logprobs, no_speech_probs)
+        fields = (texts, tokens, audio_features, avg_logprobs, no_speech_probs)
         if len(set(map(len, fields))) != 1:
             raise RuntimeError(f"inconsistent result lengths: {list(map(len, fields))}")
 
         return [
             DecodingResult(
                 audio_features=features,
-                language=language,
+                language=None,
                 tokens=tokens,
                 text=text,
                 avg_logprob=avg_logprob,
@@ -677,7 +651,7 @@ class DecodingTask:
                 temperature=self.options.temperature,
                 compression_ratio=compression_ratio(text),
             )
-            for text, language, tokens, features, avg_logprob, no_speech_prob in zip(*fields)
+            for text, tokens, features, avg_logprob, no_speech_prob in zip(*fields)
         ]
 
 
